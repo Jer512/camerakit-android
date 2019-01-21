@@ -122,6 +122,15 @@ public class MainActivity extends AppCompatActivity implements Toolbar.OnMenuIte
                 Log.v("CameraKitView", "PreviewListener: onStop()");
             }
         });
+
+        cameraView.setFrameCallback(new CameraKitView.FrameCallback() {
+            @Override
+            public void onFrame(CameraKitView view, byte[] jpeg) {
+                Log.v("Testing", "JPEG L: "+ jpeg.length);
+            }
+        });
+
+        cameraView.setSensorPreset(CameraKit.SENSOR_PRESET_STEADYPHOTO);
     }
 
     @Override

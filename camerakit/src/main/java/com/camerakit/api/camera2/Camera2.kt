@@ -97,8 +97,12 @@ class Camera2(eventsDelegate: CameraEvents, context: Context) :
     override fun startPreview(surfaceTexture: SurfaceTexture) {
         val cameraDevice = cameraDevice
         val imageReader = imageReader
+
         if (cameraDevice != null && imageReader != null) {
             val surface = Surface(surfaceTexture)
+
+            imageReader.setOnImageAvailableListener()
+
             cameraDevice.getCaptureSession(surface, imageReader, cameraHandler) { captureSession ->
                 this.captureSession = captureSession
 
@@ -309,7 +313,5 @@ class Camera2(eventsDelegate: CameraEvents, context: Context) :
         override val photoSizes: Array<CameraSize> = cameraCharacteristics.getPhotoSizes()
 
         override val flashes: Array<CameraFlash> = cameraCharacteristics.getFlashes()
-
     }
-
 }

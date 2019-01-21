@@ -3,6 +3,9 @@ package com.camerakit
 import android.content.Context
 import android.os.Build
 import android.util.AttributeSet
+import android.util.Log
+import android.view.OrientationEventListener
+import android.view.View
 import android.view.WindowManager
 import android.widget.FrameLayout
 import com.camerakit.preview.CameraSurfaceTexture
@@ -18,6 +21,7 @@ import com.camerakit.api.camera2.Camera2
 import com.camerakit.type.CameraFacing
 import com.camerakit.type.CameraFlash
 import com.camerakit.type.CameraSize
+import com.camerakit.util.OrientationManager
 import com.jpegkit.Jpeg
 import kotlinx.coroutines.*
 import kotlin.coroutines.Continuation
@@ -56,10 +60,14 @@ class CameraPreview : FrameLayout, CameraEvents {
         }
 
     var listener: Listener? = null
+    var orientationEventListener: OrientationManager
 
     var displayOrientation: Int = 0
     var previewOrientation: Int = 0
     var captureOrientation: Int = 0
+    var rawOrientation: Int = 0
+    var actualOrientationFound: Boolean = false
+
     var previewSize: CameraSize = CameraSize(0, 0)
     var surfaceSize: CameraSize = CameraSize(0, 0)
         get() {
@@ -97,6 +105,24 @@ class CameraPreview : FrameLayout, CameraEvents {
         val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
         displayOrientation = windowManager.defaultDisplay.rotation * 90
 
+        orientationEventListener = object : OrientationManager(context) {
+            override fun onScreenOrientationChanged(orientation: ScreenOrientation?) {
+
+                rawOrientation = when (orientation) {
+                    ScreenOrientation.PORTRAIT -> 0
+                    ScreenOrientation.REVERSED_PORTRAIT -> 180
+                    ScreenOrientation.LANDSCAPE -> 90
+                    ScreenOrientation.REVERSED_LANDSCAPE -> 270
+                    else -> 0
+                }
+
+                Log.v("CameraKitPreview", "Screen Orientation: " + orientation.toString())
+
+                actualOrientationFound = true
+                updateOrientation(rawOrientation)
+            }
+        }
+
         cameraSurfaceView.cameraSurfaceTextureListener = object : CameraSurfaceTextureListener {
             override fun onSurfaceReady(cameraSurfaceTexture: CameraSurfaceTexture) {
                 surfaceTexture = cameraSurfaceTexture
@@ -126,6 +152,7 @@ class CameraPreview : FrameLayout, CameraEvents {
                 lifecycleState = LifecycleState.RESUMED
                 try {
                     startPreview()
+                    orientationEventListener.enable()
                 } catch (e: Exception) {
                     // camera or surface not ready, wait.
                 }
@@ -137,6 +164,8 @@ class CameraPreview : FrameLayout, CameraEvents {
         GlobalScope.launch(cameraDispatcher) {
             runBlocking {
                 lifecycleState = LifecycleState.PAUSED
+                orientationEventListener.disable()
+                actualOrientationFound = false
                 stopPreview()
             }
         }
@@ -146,6 +175,7 @@ class CameraPreview : FrameLayout, CameraEvents {
         GlobalScope.launch(cameraDispatcher) {
             runBlocking {
                 lifecycleState = LifecycleState.STOPPED
+                orientationEventListener.disable()
                 closeCamera()
             }
         }
@@ -159,6 +189,7 @@ class CameraPreview : FrameLayout, CameraEvents {
                     cameraApi.cameraHandler.post {
                         val jpeg = Jpeg(it)
                         jpeg.rotate(captureOrientation)
+
                         val transformedBytes = jpeg.jpegBytes
                         jpeg.release()
                         callback.onCapture(transformedBytes)
@@ -168,8 +199,25 @@ class CameraPreview : FrameLayout, CameraEvents {
         }
     }
 
+    fun updateOrientation(orientation: Int) {
+        val attributes = attributes ?: return
+
+        var orientation = orientation
+        if(actualOrientationFound)
+            orientation = rawOrientation
+
+        captureOrientation = when (cameraFacing) {
+            CameraFacing.BACK -> (attributes.sensorOrientation - orientation + 360) % 360
+            CameraFacing.FRONT -> (attributes.sensorOrientation + orientation + 360) % 360
+        }
+    }
+
     interface PhotoCallback {
         fun onCapture(jpeg: ByteArray)
+    }
+
+    interface FrameCallback {
+        fun onFrame(jpeg: ByteArray)
     }
 
     // CameraEvents:
@@ -249,10 +297,7 @@ class CameraPreview : FrameLayout, CameraEvents {
                 }
             }
 
-            captureOrientation = when (cameraFacing) {
-                CameraFacing.BACK -> (attributes.sensorOrientation - displayOrientation + 360) % 360
-                CameraFacing.FRONT -> (attributes.sensorOrientation + displayOrientation + 360) % 360
-            }
+            updateOrientation(displayOrientation)
 
             if (Build.VERSION.SDK_INT >= 21 && !FORCE_DEPRECATED_API) {
                 surfaceTexture.setRotation(displayOrientation)
@@ -303,5 +348,4 @@ class CameraPreview : FrameLayout, CameraEvents {
         fun onPreviewStarted()
         fun onPreviewStopped()
     }
-
 }
